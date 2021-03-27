@@ -1,12 +1,16 @@
 #include "game_hooks.hpp"
 
-bool setupDone = false;
-
-void(__thiscall *EditorPauseLayer_saveLevel)(EditorPauseLayer *);
-EditorPauseLayer *(__thiscall *EditorPauseLayer_constructor)(void *);
-
 // this is in seconds
 constexpr int AUTOSAVE_DELAY = 300;
+
+bool setupDone = false;
+
+void (__thiscall *EditorPauseLayer_saveLevel)(EditorPauseLayer *);
+EditorPauseLayer *(__thiscall *EditorPauseLayer_constructor)(void *);
+void (__thiscall *GJOptionsLayer_addToggle)(cocos2d::CCLayer *, const char *name, const char *tag, const char *description);
+
+void *(__thiscall *GameManager_sharedState)();
+bool (__thiscall *GameManager_getGameVariable)(void *, const char *tag);
 
 template <typename T> T *offset_from_base(void *struct_ptr, int addr) {
   return reinterpret_cast<T *>(reinterpret_cast<uintptr_t>(struct_ptr) + addr);
@@ -33,6 +37,22 @@ public:
   // fun fact, the editor doesn't actually do saving. is that fun?
   void onSaveInterval(float dt)
   {
+    auto gm = GameManager_sharedState();
+    if (GameManager_getGameVariable(gm, "9599")) {
+      auto autosave_label =
+          reinterpret_cast<cocos2d::CCLabelBMFont *>(this->getChildByTag(232));
+      if (autosave_label != nullptr) {
+        autosave_label->setVisible(false);
+      }
+
+      auto user_object = dynamic_cast<EditorUI_extObj *>(this->getUserObject());
+      if (user_object != nullptr) {
+        user_object->resetSaveTimer();
+      }
+
+      return;
+      }
+
     auto user_object = dynamic_cast<EditorUI_extObj *>(this->getUserObject());
     if (user_object != nullptr) {
       user_object->incrementSaveTimer();
@@ -111,6 +131,15 @@ bool __fastcall EditorUI_init_H(EditorUI *self, void *, LevelEditorLayer *editor
   return true;
 }
 
+void (__thiscall *EditorOptionsLayer_setupOptions_O)(cocos2d::CCLayer *);
+void __fastcall EditorOptionsLayer_setupOptions_H(cocos2d::CCLayer *self) {
+  EditorOptionsLayer_setupOptions_O(self);
+
+  GJOptionsLayer_addToggle(self, "Disable Autosave", "9599", nullptr);
+
+  return;
+};
+
 // no need to export this, not putting in .h
 struct game_hook {
   void *orig_addr;
@@ -141,12 +170,17 @@ void doTheHook() {
   }
 
   // wall of hooks
-  std::array<game_hook, 1> hooks{{
+  std::array<game_hook, 2> hooks{{
       CREATE_GD_HOOK(0x76310, EditorUI_init),
+      CREATE_GD_HOOK(0x139E60, EditorOptionsLayer_setupOptions),
   }};
 
   RESOLVE_GD_FUNC(0x75010, EditorPauseLayer_saveLevel);
   RESOLVE_GD_FUNC(0x72F10, EditorPauseLayer_constructor);
+  RESOLVE_GD_FUNC(0x138C30, GJOptionsLayer_addToggle);
+
+  RESOLVE_GD_FUNC(0xC4A50, GameManager_sharedState);
+  RESOLVE_GD_FUNC(0xC9D30, GameManager_getGameVariable);
 
   for (const auto &hook : hooks) {
     MH_CreateHook(hook.orig_addr, hook.hook_fn, hook.orig_fn);
